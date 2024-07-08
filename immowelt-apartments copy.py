@@ -40,7 +40,13 @@ api_headers = {}
 ############################################################################################################
 
 async def send_message(message):
+     # TOKEN = ""
+    # chat_id = ""
+    # message_to_send = message
+    # url = f""
     print(message)
+    # print(requests.get(url).json())
+
 
 async def random_delay():
     delay = random.uniform(1, 5)  # Random delay between 1 and 5 seconds
@@ -95,6 +101,35 @@ async def process_listing(url, property_category_id):
         print("Processing listing...")
         print("=" * 100)
         
+        # ################################################################################################
+        # ############################ UPLOAD HTML CONTENT TO SUPABASE STORAGE ###########################
+        # ################################################################################################
+
+        # try:
+        #     # Get the whole HTML content of the page
+        #     raw_html = await page.content()
+        #     file_name = url.split("/")[-1]
+        #     # Write the raw_html content to a local file
+        #     local_file_path = "/tmp/" + file_name + ".html"
+        #     with open(local_file_path, 'w') as file:
+        #         file.write(raw_html)
+            
+        #     path = "immowelt/" + str(property_category_id) + "/" + file_name + ".html"
+        #     supabase.storage.from_("html_raw_data").upload(file=local_file_path, path=path, file_options={"content-type": "text/html"})
+        #     os.remove(local_file_path)
+        #     print("HTML content uploaded to Supabase storage.")
+        # except:
+        #     try:
+        #         supabase.storage.from_("html_raw_data").upload(file=local_file_path, path=path, file_options={"cache-control": "3600", "upsert": "true"})
+        #         print("HTML content updated in Supabase storage.")
+        #     except Exception as e:
+        #         print("Error in uploading HTML content to Supabase storage:", str(e))
+        #         await send_message(f"🟠 IWS - Error in uploading HTML content to Supabase storage: {str(e)}")
+
+        ################################################################################################
+        ################################################################################################
+        ################################################################################################
+
         # Create a dictionary containing the listing data
         listing_data = {}
         market_data = {}
@@ -192,6 +227,7 @@ async def process_listing(url, property_category_id):
             print("Hausgeld:", hausgeld.strip())
             listing_data["household_costs"] = int(hausgeld) if hausgeld else 0
 
+        # TODO: needs to be tested
         category_element_1 = await page.querySelector("div[data-test='feature-categories']")
         category_text_1 = await (await category_element_1.getProperty("textContent")).jsonValue() if category_element_1 else ""
 
@@ -226,6 +262,7 @@ async def process_listing(url, property_category_id):
             print("Floor: ", 0)
             listing_data["floor"] = 0
 
+        # TODO: needs to be tested
         if "Bezug" in category_text_1.strip():
             category_text_1 = category_text_1.replace("Bezug", "")
             print("Available from: ", category_text_1.strip())
@@ -235,7 +272,7 @@ async def process_listing(url, property_category_id):
             print("Available from: ", category_text_2.strip())
             listing_data["available_from"] = category_text_2.strip()
 
-        
+         # TODO: needs to be tested
         try:
             year_built = ""
             elements_containing_baujahr = await page.querySelectorAll('*:not(script):not(style):not(noscript)')
@@ -259,6 +296,7 @@ async def process_listing(url, property_category_id):
         # listing_data["year_built"] = int(year_built) if year_built.isdigit() else ""
 
         try:
+            # TODO: needs to be tested  
             features_element = await page.querySelector("div[data-test='features']")
             features_elements = await features_element.querySelectorAll("li")
             features = []
@@ -270,6 +308,20 @@ async def process_listing(url, property_category_id):
         except:
             print("Features: None")
             listing_data["features"] = []
+
+        # # Get the contact type
+        # # TODO: Does not work yet !!!
+        # contact_type_element = await page.querySelectorAll('p.offerer')
+        # contact_type_text = await (await contact_type_element.getProperty("textContent")).jsonValue() if contact_type_element else ""
+        # print("Contact Type Text:", contact_type_text)
+
+        # if "Privater Anbieter" in contact_type_text:
+        #     contact_type_id = 1
+        #     print("Contact Type: Private")
+        # else:
+        #     contact_type_id = 2
+        #     print("Contact Type: Commercial")
+        # listing_data["contact_type_id"] = contact_type_id
 
         try:
             # Click the "Mehr anzeigen" button to expand the content
@@ -338,6 +390,23 @@ async def process_listing(url, property_category_id):
             listing_data["primary_energy_source"] = energy_sources.strip()
         except Exception as e:
             listing_data["primary_energy_source"] = ""
+
+        # # Get the energy Endenergiebedarf (energy_consumption)
+        # try:
+        #     await page.querySelectorAll('p[data-cy="energy-consumption"]')
+
+        #     # Extract the text content of the Endenergiebedarf element
+        #     element = await page.querySelector('p[data-cy="energy-consumption"]')
+        #     endenergiebedarf_text = await page.evaluate('(element) => element.textContent', element)
+
+        #     # Process the extracted text to remove the unit and replace the comma with a dot
+        #     endenergiebedarf_value = endenergiebedarf_text.replace(' kWh/(m²·a)', '').replace(',', '.')
+
+        #     # Print the extracted value
+        #     print('Endenergiebedarf:', endenergiebedarf_value)
+        #     listing_data["energy_consumption"] = endenergiebedarf_value
+        # except Exception as e:
+        #     listing_data["energy_consumption"] = ""
 
         print("Platform ID: 2")
         listing_data["platform_id"] = 2  # 1 = Kleinanzeigen, 2 = Immowelt, 3 = Immoscout
@@ -587,6 +656,71 @@ async def process_listing(url, property_category_id):
                 print("Error in extracting market data:", str(e))
                 await random_delay()
 
+         # ##################################################################################
+        # ############################# PRICE ESTIMATION API ###############################
+        # ##################################################################################
+
+        # print("=" * 100)
+        # print("Starting getting price from the price estimation API...")
+        # print("=" * 100)
+
+        # # This will be used to write the data to the price_estimates table in Supabase
+        # response_data = {}
+
+        # # Check if the listing data contains the required fields
+        # if "rooms" not in listing_data or "size" not in listing_data or "postal_code" not in listing_data:
+        #     print("Skipping listing because of missing data.")
+        #     await browser.close()
+        #     await random_delay()
+        #     return
+    
+        # try:
+        #     # Prepare data dictionary for the API, making 'year_built' optional
+        #     data = {
+        #         "rooms": float(listing_data["rooms"]),
+        #         "size": float(listing_data["size"]),
+        #         "postal_code": str(listing_data["postal_code"]),
+        #         "property_category_id": int(property_category_id)
+        #     }
+            
+        #     # Only add 'year_built' if it exists in listing_data
+        #     try:
+        #         data["year_built"] = int(listing_data["year_built"])
+        #     except:
+        #         # Optionally set 'year_built' to None or just omit it
+        #         data["year_built"] = None 
+        #     print("Data for the API:", data)
+
+        #     # Send a POST request to the API
+        #     response = requests.post(api_url, headers=api_headers, data=json.dumps(data))
+        #     if response.status_code != 200:
+        #         print(f"Error: API request returned status code {response.status_code}")
+        #         return
+        #     response_json = response.json()
+        #     print("Response from the API:", response_json)
+
+        #     response_data = {
+        #         'min_estimate': check_api_value(response_json, 'min_estimate', 0, int),
+        #         'median_estimate': check_api_value(response_json, 'median_estimate', 0, int),
+        #         'max_estimate': check_api_value(response_json, 'max_estimate', 0, int),
+        #         'percentage_width_of_prediction_interval': check_api_value(response_json, 'percentage_width_of_prediction_interval', 0.0, float),
+        #         'model_version': check_api_value(response_json, 'model_version', '', str),
+        #         'property_id': check_api_value(listing_data, 'property_id', '', str)
+        #     }
+        #     print("Response data:", response_data)
+
+        # except Exception as e:
+        #     print("Error in getting price from the price estimation API:", str(e))
+        #     # Send a Telegram notification
+        #     await send_message(f"🔴 IWS - Error in getting price from the price estimation API: {str(e)}")
+        #     await browser.close()
+        #     await random_delay()
+        #     return
+
+        ##################################################################################
+        ############################# DATA VALIDITY CHECKS ###############################
+        ##################################################################################
+
         print("Checking data validity...")
 
         if not listing_data["postal_code"] or not market_data["postal_code"]:
@@ -600,6 +734,63 @@ async def process_listing(url, property_category_id):
             await random_delay()
             return
         print("Checking market_data_id_conc:", market_data["market_data_id_conc"])
+
+        # ################################################################################################
+        # ################################# WRITING DATA TO SUPABASE #####################################
+        # ################################################################################################
+
+        # print("=" * 100)
+        # print("Writing data to Supabase...")
+        # print("=" * 100)
+
+        # # Check if we have more than 3 market data fields continue with the writing to Supabase
+        # if len(market_data) > 3:
+        #     try:
+        #         # Write the city data to Supabase
+        #         print("Writing MARKET DATA and to Supabase...")
+        #         supabase.table("market_data").insert([market_data]).execute() # Should only wotk if the market data does not exist yet
+        #     except:
+        #         try:
+        #             # Set the column modified_at to the current date and time as timestamptz for the postgress database
+        #             market_data["modified_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        #             # Update the market data in Supabase
+        #             print("Updating MARKET DATA in Supabase...")
+        #             supabase.table("market_data").update(market_data).eq("market_data_id_conc", market_data["market_data_id_conc"]).execute()
+        #         except Exception as e:
+        #             print("Error in updating MARKET DATA to Supabase:", str(e))
+
+        # print("=" * 100)
+
+        # try:
+        #     # Write the listing data Supabase
+        #     print("Writing LISTING to Supabase")
+        #     supabase.table("listings").insert([listing_data]).execute() # Should only wotk if the listing does not exist yet
+        # except:
+        #     try:
+        #         # Set the column modified_at to the current date and time as timestamptz for the postgress database
+        #         listing_data["modified_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        #         # Update the listing data in Supabase
+        #         print("Updating LISTING in Supabase...")
+        #         supabase.table("listings").update(listing_data).eq("property_id", listing_data["property_id"].strip()).execute()
+        #     except Exception as e:
+        #         print("Error in writing LISTING to Supabase:", str(e))
+
+        # print("=" * 100)
+
+        # try:
+        #     # Write the real estate estimates data to Supabase
+        #     print("Writing REAL ESTATE ESTIMATES to Supabase...")
+        #     supabase.table("price_estimates").insert([response_data]).execute()
+        # except Exception as e:
+        #     print("Error in writing REAL ESTATE ESTIMATES to Supabase:", str(e))
+
+        # print("=" * 100)
+        # print("DONE")
+        # print("=" * 100)
+        # if browser:
+        #     await browser.close()
+        #     await random_delay()
+        # return
 
         print("=" * 100)
         print("DONE")
