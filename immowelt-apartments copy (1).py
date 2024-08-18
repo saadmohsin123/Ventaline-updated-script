@@ -145,14 +145,14 @@ async def process_listing(url, property_category_id):
         listing_data["property_id"] = property_id
 
         # Updated Title extraction logic
-        title_element = await page.querySelector('h2[data-testid="aviv.CDP.Sections.Description.MainDescription.Title"]')
+        title_element = await page.querySelector("h1")
         if not title_element:
             title_element = await page.querySelector("title")
         title = await (await title_element.getProperty("textContent")).jsonValue() if title_element else ""
         listing_data["title"] = title.strip()
         print("Title:", title.strip())
 
-        price_element = await page.querySelector('span[data-testid="aviv.CDP.Sections.Hardfacts.Price.Value"]')
+        price_element = await page.querySelector("div.has-font-300 strong.ng-star-inserted")
         price = await (await price_element.getProperty("textContent")).jsonValue() if price_element else ""
         if price.strip() == "VB":
             price = "0"
@@ -163,7 +163,7 @@ async def process_listing(url, property_category_id):
 
         # Evaluate JavaScript on the page to extract image URLs
         image_urls = await page.evaluate('''() => {
-            const pictureElements = document.querySelectorAll("div[data-testid='aviv.CDP.Gallery.MobilePreview.ImageSlider'] img");
+            const pictureElements = document.querySelectorAll("div.swiper-slide img.swiper-lazy");
             const urls = [];
 
             for (const picture of pictureElements) {
@@ -178,7 +178,7 @@ async def process_listing(url, property_category_id):
         print("Image URLs:", image_urls)
         listing_data["image_urls"] = image_urls
 
-        commission_element = await page.querySelector('div[data-testid="aviv.CDP.Sections.Price.MainPrice.commissionFee"]')
+        commission_element = await page.querySelector('div[data-cy="commission"] p.card-content')
         commission_text = await (await commission_element.getProperty("textContent")).jsonValue() if commission_element else ""
         if "provisionsfrei" in commission_text.lower():
             print("Broker commission: False")
@@ -187,7 +187,7 @@ async def process_listing(url, property_category_id):
             print("Broker commission: True")
             listing_data["broker_commission"] = True
 
-        size_element = await page.querySelector("div.css-jtsp8r > div:nth-child(2) > div > div > span.css-2bd70b")
+        size_element = await page.querySelector("div.hardfact span.has-font-300")
         size = await (await size_element.getProperty("textContent")).jsonValue() if size_element else ""
         size = re.sub(" m²", "", size)
         size = size.replace(",", ".")
@@ -197,7 +197,8 @@ async def process_listing(url, property_category_id):
         except:
             listing_data["size"] = size.strip()
 
-        rooms_element = await page.querySelector("div.css-jtsp8r > div:nth-child(1) > div > div > span.css-2bd70b")
+        rooms_elements = await page.querySelectorAll("div.hardfact span.has-font-300")
+        rooms_element = rooms_elements[1] if len(rooms_elements) > 1 else None
         rooms = await (await rooms_element.getProperty("textContent")).jsonValue() if rooms_element else ""
         # check if the text contains the word "k.A."
         if "k.A." in rooms.strip():
@@ -208,7 +209,7 @@ async def process_listing(url, property_category_id):
             print("Zimmer:", rooms.strip())
             listing_data["rooms"] = float(rooms.strip()) if rooms.strip() else 0
 
-        foreclosure_element = await page.querySelector('li[data-testid="aviv.CDP.Header-NavigationBar-NavigationBarL1EntryExpandable[0]"]')
+        foreclosure_element = await page.querySelector("div.flex.flex-wrap sd-badge.badge--primary")
         foreclosure_text = await (await foreclosure_element.getProperty("textContent")).jsonValue() if foreclosure_element else ""
         if "Zwangsversteigerung" in foreclosure_text:
             print("Foreclosure: True")
@@ -217,12 +218,14 @@ async def process_listing(url, property_category_id):
             print("Foreclosure: False")
             listing_data["foreclosure"] = False
 
-        
-        hausgeld_element = await page.querySelector('div[data-testid="aviv.CDP.Sections.Price.AdditionalPrice"] div.css-dkmti6 span.css-9wpf20')
-        hausgeld = await (await hausgeld_element.getProperty("textContent")).jsonValue() if hausgeld_element else ""
-        hausgeld = re.sub("[^0-9]", "", hausgeld.strip())
-        print("Hausgeld:", hausgeld.strip())
-        listing_data["household_costs"] = int(hausgeld) if hausgeld else 0
+        row2_element = await page.querySelector("div[data-test='additional-costs']")
+        row2_text = await (await row2_element.getProperty("textContent")).jsonValue() if row2_element else ""
+        if "Hausgeld" in row2_text:
+            hausgeld_element = await page.querySelector("div[data-test='additional-costs']")
+            hausgeld = await (await hausgeld_element.getProperty("textContent")).jsonValue() if hausgeld_element else ""
+            hausgeld = re.sub("[^0-9]", "", hausgeld.strip())
+            print("Hausgeld:", hausgeld.strip())
+            listing_data["household_costs"] = int(hausgeld) if hausgeld else 0
 
         # TODO: needs to be tested
         category_element_1 = await page.querySelector("div[data-test='feature-categories']")
@@ -239,66 +242,63 @@ async def process_listing(url, property_category_id):
             print("Property Type: Andere Wohnungstypen")
             listing_data["property_type"] = "Andere Wohnungstypen"
 
-        available_from = await page.evaluate('''
-            () => {
-                const features = document.querySelectorAll('div[data-testid="aviv.CDP.Sections.Features.Feature"]');
-                for (let feature of features) {
-                    const pathElement = feature.querySelector('svg path');
-                    if (pathElement && pathElement.getAttribute('d') === 'M7.8 2.4a.6.6 0 0 1 .6.6v1.8h7.2V3a.6.6 0 0 1 1.2 0v1.8H18c1.324 0 2.4 1.075 2.4 2.4v12c0 1.324-1.076 2.4-2.4 2.4H6a2.4 2.4 0 0 1-2.4-2.4v-12A2.4 2.4 0 0 1 6 4.8h1.2V3a.6.6 0 0 1 .6-.6m11.4 7.2H4.8v9.6A1.2 1.2 0 0 0 6 20.4h12c.664 0 1.2-.536 1.2-1.2zM18 6H6a1.2 1.2 0 0 0-1.2 1.2v1.2h14.4V7.2c0-.663-.536-1.2-1.2-1.2') {
-                        const textElement = feature.querySelector('span.css-1az3ztj');
-                        return textElement ? textElement.textContent.trim() : '';
-                    }
-                }
-                return '';
-            }
-        ''')
-        if available_from != None:
-            if available_from != "":
-                listing_data["available_from"] = available_from
-                print("Available from: ", available_from)
+        try:
+            if "Wohnungslage" in category_text_1.strip():
+                if "Erdgeschoss" in category_text_1.strip():
+                    print("Floor: ", 0)
+                    listing_data["floor"] = 0
+                elif "Dachgeschoss" in category_text_1.strip():
+                    print("Floor: ", 0)
+                    listing_data["floor"] = 0
+                else:
+                    category_text_1 = re.sub("[^0-9]", "", category_text_1.strip())
+                    print("Floor: ", category_text_1.strip())
+                    listing_data["floor"] = int(category_text_1.strip()) if category_text_1 else 0
+            elif "Wohnungslage" in category_text_2.strip():
+                category_text_2 = re.sub("[^0-9]", "", category_text_2.strip())
+                print("Floor: ", category_text_2.strip())
+                listing_data["floor"] = int(category_text_2.strip())
+        except:
+            print("Floor: ", 0)
+            listing_data["floor"] = 0
 
-        floors = await page.evaluate('''
-            () => {
-                const features = document.querySelectorAll('div[data-testid="aviv.CDP.Sections.Features.Feature"]');
-                for (let feature of features) {
-                    const pathElement = feature.querySelector('svg path');
-                    if (pathElement && pathElement.getAttribute('d') === 'M11.182 2.575A2 2 0 0 1 12 2.4c.281 0 .529.06.818.175L20.97 6.23a1.063 1.063 0 0 1 0 1.942l-8.152 3.653A2.1 2.1 0 0 1 12 12a2 2 0 0 1-.818-.176L3.028 8.17a1.065 1.065 0 0 1 0-1.942l8.154-3.654ZM12 3.6c-.146 0-.259.024-.33.07L3.798 7.2l7.872 3.529c.071.048.184.07.33.07a.8.8 0 0 0 .33-.07l7.871-3.53L12.33 3.67A.8.8 0 0 0 12 3.6m-6.653 7.046c.136.304 0 .66-.301.795L3.798 12l7.872 3.529c.071.048.184.07.33.07a.8.8 0 0 0 .33-.07l7.871-3.53-1.245-.558a.6.6 0 1 1 .488-1.095l1.526.683a1.063 1.063 0 0 1 0 1.942l-8.152 3.653A2.1 2.1 0 0 1 12 16.8a2 2 0 0 1-.818-.176L3.028 12.97a1.065 1.065 0 0 1 0-1.942l1.527-.683a.6.6 0 0 1 .792.3ZM3.797 16.8l7.873 3.529c.071.048.184.07.33.07a.8.8 0 0 0 .33-.07l7.871-3.53-1.245-.558a.6.6 0 1 1 .488-1.095l1.526.683a1.063 1.063 0 0 1 0 1.942l-8.152 3.653A2.1 2.1 0 0 1 12 21.6a2 2 0 0 1-.818-.176L3.028 17.77a1.065 1.065 0 0 1 0-1.942l1.527-.683a.6.6 0 0 1 .792.3c.136.304 0 .66-.302.795l-1.247.559Z') {
-                        const textElement = feature.querySelector('span.css-1az3ztj');
-                        return textElement ? textElement.textContent.trim() : '';
-                    }
-                }
-                return '';
-            }
-        ''')
-        if "Wohnungslage" in floors:
-            if "Erdgeschoss" in floors:
-                print("Floor: ", 0)
-                listing_data["floor"] = 0
-            elif "Dachgeschoss" in floors:
-                print("Floor: ", 0)
-                listing_data["floor"] = 0
+        # TODO: needs to be tested
+        if "Bezug" in category_text_1.strip():
+            category_text_1 = category_text_1.replace("Bezug", "")
+            print("Available from: ", category_text_1.strip())
+            listing_data["available_from"] = category_text_1.strip()
+        elif "Bezug" in category_text_2.strip():
+            category_text_2 = category_text_2.replace("Bezug", "")
+            print("Available from: ", category_text_2.strip())
+            listing_data["available_from"] = category_text_2.strip()
+
+         # TODO: needs to be tested
+        try:
+            year_built = ""
+            elements_containing_baujahr = await page.querySelectorAll('*:not(script):not(style):not(noscript)')
+
+            for element in elements_containing_baujahr:
+                text = await (await element.getProperty('textContent')).jsonValue()
+                match = re.search(r'Baujahr\s*:\s*(\d{4})', text)
+                if match:
+                    year_built = match.group(1)
+                    break
+
+            if year_built.isdigit():
+                listing_data["year_built"] = int(year_built)
+                print("Year of construction:", year_built)
             else:
-                category_text_1 = re.sub("[^0-9]", "", floors)
-                print("Floor: ", floors)
-                listing_data["floor"] = int(floors) if floors else 0
-        else: 
-            if available_from != None:
-                if available_from != "":
-                    listing_data["floor"] = str(floors).split("floor")[0].replace(" ", "")
-
-
-        year_built = await page.querySelector('span[data-testid="aviv.CDP.Sections.Energy.Features.yearOfConstruction"]')
-        year_built = await (await year_built.getProperty("textContent")).jsonValue() if year_built else ""
-        print("Year of construction:", year_built)
-        if year_built.isdigit():
-            listing_data["year_built"] = int(year_built)
-            print("Year of construction:", year_built)
-        else:
+                listing_data["year_built"] = ""
+                print("Year of construction: Not found")
+        except Exception as e:
+            print("Error extracting year of construction:", e)
             listing_data["year_built"] = ""
-            print("Year of construction: Not found")
+        # listing_data["year_built"] = int(year_built) if year_built.isdigit() else ""
 
         try:
-            features_elements = await page.querySelectorAll('div[data-testid="aviv.CDP.Sections.Features.Feature"] span')
+            # TODO: needs to be tested  
+            features_element = await page.querySelector("div[data-test='features']")
+            features_elements = await features_element.querySelectorAll("li")
             features = []
             for feature_element in features_elements:
                 feature_text = await (await feature_element.getProperty("textContent")).jsonValue() if feature_element else ""
@@ -324,13 +324,14 @@ async def process_listing(url, property_category_id):
         # listing_data["contact_type_id"] = contact_type_id
 
         try:
-            await page.waitForSelector("section[class='Section Description'] button", timeout=50000)
+            # Click the "Mehr anzeigen" button to expand the content
+            await page.waitForSelector("app-details sd-read-more[morelabel='Mehr anzeigen'].ng-star-inserted > a", timeout=50000)
             await page.evaluate('''() => {
-                const readMoreButtons = document.querySelectorAll('section[class="Section Description"] button');
+                const readMoreButtons = document.querySelectorAll('app-details sd-read-more[morelabel="Mehr anzeigen"].ng-star-inserted > a');
                 readMoreButtons.forEach(button => button.click());
             }''')
 
-            description_elements = await page.querySelectorAll('div[class="DescriptionTexts"]')
+            description_elements = await page.querySelectorAll('div.card-content')
             description_html = ""
             for description_element in description_elements:
                 html_content = await (await description_element.getProperty("innerHTML")).jsonValue() if description_element else ""
@@ -368,8 +369,11 @@ async def process_listing(url, property_category_id):
 
         # Get the energy certificate value (energy_efficiency_class)
         try:
-            element = await page.querySelector('div[data-testid="aviv.CDP.Sections.Energy.Preview.EfficiencyClass"]')
-            energy_efficiency_class = await (await element.getProperty("textContent")).jsonValue() if commission_element else ""
+            await page.querySelectorAll('div[class*="efficiency-class__item--highlighted"]')
+
+            element = await page.querySelector('div[class*="efficiency-class__item--highlighted"] span')
+            energy_efficiency_class = await page.evaluate('(element) => element.textContent', element)
+
             print('Energieeffizienzklasse:', energy_efficiency_class)
             listing_data["energy_efficiency_class"] = energy_efficiency_class.strip()
         except Exception as e:
@@ -422,22 +426,22 @@ async def process_listing(url, property_category_id):
         print("Starting location data extraction...")
         print("=" * 100)
 
-        street_element = await page.querySelector('div[data-testid="aviv.CDP.Sections.Location.Address"] span.css-62z2dn')
+        street_element = await page.querySelector('span[data-cy="address-street"]')
         street = await (await street_element.getProperty("textContent")).jsonValue() if street_element else ""
-        parts = street.split(',')
-        if len(parts) > 2:
-            street2 = parts[0].strip()
+        if street.strip() == "Straße nicht freigegeben":
+            listing_data["street"] = ""
         else:
-            street2 = ""
-        listing_data["street"] = street2
+            listing_data["street"] = street.strip()
         print("Street:", listing_data["street"])
 
-        postal_code = street.split('(')[1].replace(")","")
+        postal_code_element = await page.querySelector('span[data-cy="address-city"]')
+        city_postal_code_element_text = await (await postal_code_element.getProperty("textContent")).jsonValue() if postal_code_element else ""
+        postal_code = city_postal_code_element_text.split(' ')[0]
         market_data["postal_code"] = postal_code
         try:
-            city = street.split(',')[1].split('(')[0]
+            city = city_postal_code_element_text.split(' ')[1] + city_postal_code_element_text.split(' ')[2]
         except:
-            city = ""
+            city = city_postal_code_element_text.split(' ')[1]
         print("City : ", city)
         print("Postal Code:", postal_code)
         ################################################################################################
@@ -473,10 +477,10 @@ async def process_listing(url, property_category_id):
             await random_delay()
         else:
             try:
-                if street2.strip() == "" or street2.strip() == "Straße nicht freigegeben":
+                if street.strip() == "" or street.strip() == "Straße nicht freigegeben":
                     address = f"{postal_code} {city}"
                 else:
-                    address = f"{street2}, {postal_code} {city}"
+                    address = f"{street}, {postal_code} {city}"
 
                 url = "https://www.homeday.de/de/preisatlas"
                 await page.goto(url, {'timeout': 120000})
@@ -810,54 +814,47 @@ async def main():
         print("=" * 100)
         print("Starting main loop...")
         print("=" * 100)
-        try:      
-            await process_listing("https://www.immowelt.de/expose/2frja54", 1)
-            await random_delay()  # Introduce a random delay after each request
-        except Exception as e:
-            print("Error processing listing:", e)
-            if browser:
-                await browser.close()
+
+        apartments = []
+        await send_message(f"🟢 IWS - Getting APARTMENTS 🏢")
+
+        for page_number in range(1, pages_to_scrape + 1):
+            print("=" * 100)
+            print("Page:", page_number)
+            print("=" * 100)
+
+            apartmentsUrl = f"https://www.immowelt.de/suche/deutschland/wohnungen/kaufen?d=true&sd=DESC&sf=TIMESTAMP&sp={page_number}"
+            browser = await open_browser()
             await random_delay()
-        # apartments = []
-        # await send_message(f"🟢 IWS - Getting APARTMENTS 🏢")
+            page = await browser.newPage()
+            await random_delay()
+            await page.goto(apartmentsUrl, {'timeout': 120000})
 
-        # for page_number in range(1, pages_to_scrape + 1):
-        #     print("=" * 100)
-        #     print("Page:", page_number)
-        #     print("=" * 100)
+            await page.waitForSelector('.EstateItem-4409d')
+            apartments_on_page = await page.querySelectorAll('.EstateItem-4409d')
 
-        #     apartmentsUrl = f"https://www.immowelt.de/suche/deutschland/wohnungen/kaufen?d=true&sd=DESC&sf=TIMESTAMP&sp={page_number}"
-        #     browser = await open_browser()
-        #     await random_delay()
-        #     page = await browser.newPage()
-        #     await random_delay()
-        #     await page.goto(apartmentsUrl, {'timeout': 120000})
+            for apartment in apartments_on_page:
+                link_element = await apartment.querySelector('a')
+                link_href = await (await link_element.getProperty("href")).jsonValue()
+                parsed_url = urlparse(link_href)
+                if parsed_url.scheme in ["http", "https"]:
+                    print("Apartment:", link_href)
+                    apartments.append(link_href)
 
-        #     await page.waitForSelector('.EstateItem-4409d')
-        #     apartments_on_page = await page.querySelectorAll('.EstateItem-4409d')
+            await browser.close()
+            await random_delay()  # Introduce a random delay after each request
 
-        #     for apartment in apartments_on_page:
-        #         link_element = await apartment.querySelector('a')
-        #         link_href = await (await link_element.getProperty("href")).jsonValue()
-        #         parsed_url = urlparse(link_href)
-        #         if parsed_url.scheme in ["http", "https"]:
-        #             print("Apartment:", link_href)
-        #             apartments.append(link_href)
+        await send_message(f"🟢 IWS - Start scraping with {len(apartments)} APARTMENTS 🏢")
 
-        #     await browser.close()
-        #     await random_delay()  # Introduce a random delay after each request
-
-        # await send_message(f"🟢 IWS - Start scraping with {len(apartments)} APARTMENTS 🏢")
-
-        # for apartment in apartments:
-        #     try:
-        #         await process_listing(apartment, 1)
-        #         await random_delay()  # Introduce a random delay after each request
-        #     except Exception as e:
-        #         print("Error processing listing:", e)
-        #         if browser:
-        #             await browser.close()
-        #         await random_delay()
+        for apartment in apartments:
+            try:
+                await process_listing(apartment, 1)
+                await random_delay()  # Introduce a random delay after each request
+            except Exception as e:
+                print("Error processing listing:", e)
+                if browser:
+                    await browser.close()
+                await random_delay()
 
     except Exception as e:
         print("Error in main loop:", str(e))
